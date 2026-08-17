@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: payment-transfer-service
+  datasource:
+    url: jdbc:h2:mem:bankdb
+    driver-class-name: org.h2.Driver
+    hikari:
+      maximum-pool-size: 50
+  h2:
+    console:
+      enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+payment-transfer:
+  max-transfer-amount: 10000
