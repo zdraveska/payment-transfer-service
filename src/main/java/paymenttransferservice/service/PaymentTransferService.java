@@ -87,8 +87,7 @@ public class PaymentTransferService {
         }
 
         try {
-            validateCurrenciesMatch(source.getCurrency(), destination.getCurrency(),
-                    Currency.getInstance(request.getCurrency()));
+            validateCurrenciesMatch(source.getCurrency(), destination.getCurrency(), Currency.getInstance(request.getCurrency()));
             validateTransferLimit(request);
             applyBalanceChanges(source, destination, request.getAmount());
 
@@ -112,37 +111,38 @@ public class PaymentTransferService {
                 && existing.getCurrency().getCurrencyCode().equals(request.getCurrency());
     }
 
-    private AccountPair lockAccountsInOrder(UUID sourceId, UUID destinationId) {
-        // Always lock in the same order (by ID) so two transfers moving money in
-        // opposite directions between the same pair of accounts can't deadlock.
-
-        UUID firstLockId = sourceId.compareTo(destinationId) < 0 ? sourceId : destinationId;
-        UUID secondLockId = sourceId.compareTo(destinationId) < 0 ? destinationId : sourceId;
-
-        Account first = accountRepository.findByIdForUpdate(firstLockId).orElseThrow(() -> new AccountNotFoundException(firstLockId));
-        Account second = accountRepository.findByIdForUpdate(secondLockId).orElseThrow(() -> new AccountNotFoundException(secondLockId));
-
-        Account source = sourceId.equals(first.getId()) ? first : second;
-        Account destination = sourceId.equals(first.getId()) ? second : first;
-
-        return new AccountPair(source, destination);
-    }
-
     private void validateSameAccount(PaymentTransferRequest request) {
         if (request.getSourceAccountId().equals(request.getDestinationAccountId())) {
             throw new InvalidTransferException("Source and destination accounts must be different");
         }
     }
 
-    private void validateTransferLimit(PaymentTransferRequest request) {
-        if (request.getAmount().compareTo(maxTransferAmount) > 0) {
-            throw new TransferLimitExceededException(request.getAmount(), maxTransferAmount);
-        }
+    private AccountPair lockAccountsInOrder(UUID sourceId, UUID destinationId) {
+        // Always lock in the same order (by ID) so two transfers moving money in
+        // opposite directions between the same pair of accounts can't deadlock.
+        boolean sourceLocksFirst = sourceId.compareTo(destinationId) < 0;
+
+        Account first = lockAccount(sourceLocksFirst ? sourceId : destinationId);
+        Account second = lockAccount(sourceLocksFirst ? destinationId : sourceId);
+
+        return sourceLocksFirst
+                ? new AccountPair(first, second)
+                : new AccountPair(second, first);
+    }
+
+    private Account lockAccount(UUID accountId) {
+        return accountRepository.findByIdForUpdate(accountId).orElseThrow(() -> new AccountNotFoundException(accountId));
     }
 
     private void validateCurrenciesMatch(Currency sourceCurrency, Currency destinationCurrency, Currency requestCurrency) {
         if (!sourceCurrency.equals(requestCurrency) || !destinationCurrency.equals(requestCurrency)) {
             throw new InvalidTransferException("Currency mismatch between accounts and transfer request");
+        }
+    }
+
+    private void validateTransferLimit(PaymentTransferRequest request) {
+        if (request.getAmount().compareTo(maxTransferAmount) > 0) {
+            throw new TransferLimitExceededException(request.getAmount(), maxTransferAmount);
         }
     }
 

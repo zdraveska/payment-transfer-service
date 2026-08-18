@@ -108,6 +108,27 @@ class PaymentTransferControllerIT {
     }
 
     @Test
+    void accountTransactions_areVisibleFromBothSidesOfTheTransfer() throws Exception {
+        postTransfer(transferRequest(new BigDecimal("30.00"), UUID.randomUUID().toString()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(ACCOUNT_TRANSACTIONS_URL, sourceId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].sourceAccountId").value(sourceId.toString()))
+                .andExpect(jsonPath("$[0].amount").value(30.00));
+
+        mockMvc.perform(get(ACCOUNT_TRANSACTIONS_URL, destinationId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+
+        UUID quietAccountId = createAccount(createUser("Quiet", "User"), new BigDecimal("10.00")).getId();
+        mockMvc.perform(get(ACCOUNT_TRANSACTIONS_URL, quietAccountId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
     void transfer_isRejectedWhenTheRequestItselfIsInvalid() throws Exception {
         postTransfer(new PaymentTransferRequest())
                 .andExpect(status().isBadRequest())
@@ -135,6 +156,16 @@ class PaymentTransferControllerIT {
                                  "currency":"eur","idempotencyKey":"%s"}""".formatted(
                                 sourceId, destinationId, UUID.randomUUID())))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void transfer_isRejectedWhenAmountHasMorePrecisionThanWeStore() throws Exception {
+        postTransfer(transferRequest(new BigDecimal("10.123"), UUID.randomUUID().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(VALIDATION_ERROR));
+
+        assertThat(transactionsOf(sourceId)).isEmpty();
+        assertThat(balanceOf(sourceId)).isEqualByComparingTo("1000.00");
     }
 
     @Test
@@ -175,27 +206,6 @@ class PaymentTransferControllerIT {
     }
 
     @Test
-    void accountTransactions_areVisibleFromBothSidesOfTheTransfer() throws Exception {
-        postTransfer(transferRequest(new BigDecimal("30.00"), UUID.randomUUID().toString()))
-                .andExpect(status().isOk());
-
-        mockMvc.perform(get(ACCOUNT_TRANSACTIONS_URL, sourceId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].sourceAccountId").value(sourceId.toString()))
-                .andExpect(jsonPath("$[0].amount").value(30.00));
-
-        mockMvc.perform(get(ACCOUNT_TRANSACTIONS_URL, destinationId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
-
-        UUID quietAccountId = createAccount(createUser("Quiet", "User"), new BigDecimal("10.00")).getId();
-        mockMvc.perform(get(ACCOUNT_TRANSACTIONS_URL, quietAccountId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
-    }
-
-    @Test
     void replayingAKey_returnsTheOriginalTransferInsteadOfChargingTwice() throws Exception {
         PaymentTransferRequest request = transferRequest(new BigDecimal("40.00"), UUID.randomUUID().toString());
 
@@ -222,6 +232,23 @@ class PaymentTransferControllerIT {
                 .andExpect(jsonPath("$.code").value(IDEMPOTENCY_KEY_CONFLICT));
 
         assertThat(balanceOf(sourceId)).isEqualByComparingTo("990.00");
+    }
+
+    @Test
+    void retryingAKeyWhoseTransferFailed_isAllowedToSucceed() throws Exception {
+        String idempotencyKey = UUID.randomUUID().toString();
+
+        // 5000 against a 1000 balance
+        postTransfer(transferRequest(sourceId, destinationId, new BigDecimal("5000.00"), idempotencyKey))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value(INSUFFICIENT_FUNDS));
+
+        postTransfer(transferRequest(sourceId, destinationId, new BigDecimal("50.00"), idempotencyKey))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(STATUS_SUCCESS));
+
+        assertThat(balanceOf(sourceId)).isEqualByComparingTo("950.00");
+        assertThat(transactionsOf(sourceId)).hasSize(2);
     }
 
     @Test
@@ -261,23 +288,6 @@ class PaymentTransferControllerIT {
 
         assertThat(balanceOf(sourceId)).isEqualByComparingTo("950.00");
         assertThat(transactionsOf(sourceId)).hasSize(1);
-    }
-
-    @Test
-    void retryingAKeyWhoseTransferFailed_isAllowedToSucceed() throws Exception {
-        String idempotencyKey = UUID.randomUUID().toString();
-
-        // 5000 against a 1000 balance
-        postTransfer(transferRequest(sourceId, destinationId, new BigDecimal("5000.00"), idempotencyKey))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.code").value(INSUFFICIENT_FUNDS));
-
-        postTransfer(transferRequest(sourceId, destinationId, new BigDecimal("50.00"), idempotencyKey))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value(STATUS_SUCCESS));
-
-        assertThat(balanceOf(sourceId)).isEqualByComparingTo("950.00");
-        assertThat(transactionsOf(sourceId)).hasSize(2);
     }
 
     private ResultActions postTransfer(PaymentTransferRequest request) throws Exception {

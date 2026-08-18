@@ -28,14 +28,11 @@ public class Account {
     @JoinColumn(name = "owner_id", nullable = false)
     private User owner;
 
-    @Column(nullable = false, precision = 19, scale = 4)
+    @Column(nullable = false, precision = 17, scale = 2)
     private BigDecimal balance;
 
     @Column(nullable = false)
     private Currency currency;
-
-    @Version
-    private Long version;
 
     @CreationTimestamp
     @Column(nullable = false, updatable = false)

@@ -12,7 +12,10 @@ import java.util.Currency;
 import java.util.UUID;
 
 @Entity
-@Table(name = "transactions")
+@Table(name = "transactions", indexes = {
+        @Index(name = "idx_transactions_source_account_id", columnList = "source_account_id"),
+        @Index(name = "idx_transactions_destination_account_id", columnList = "destination_account_id")
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -30,7 +33,7 @@ public class Transaction {
     @JoinColumn(name = "destination_account_id", nullable = false)
     private Account destinationAccount;
 
-    @Column(nullable = false, precision = 19, scale = 4)
+    @Column(nullable = false, precision = 17, scale = 2)
     private BigDecimal amount;
 
     @Column(nullable = false)
